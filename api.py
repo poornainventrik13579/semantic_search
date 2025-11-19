@@ -98,6 +98,7 @@ def main():
     parser.add_argument('--ngrok', action='store_true', help='Enable ngrok')
     parser.add_argument('--port', type=int, default=8000, help='Port')
     args = parser.parse_args()
+    args.port = 8000
 
     if args.ngrok:
         if ngrok is None:
@@ -128,7 +129,7 @@ def main():
         print(f"Docs:   http://localhost:{args.port}/docs")
         print("-" * 50)
 
-    uvicorn.run(app, host="0.0.0.0", port=args.port)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
 if __name__ == "__main__":
