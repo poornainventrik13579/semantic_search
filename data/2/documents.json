@@ -1,0 +1,7 @@
+{
+  "paper_id": false,
+  "title": true,
+  "authors": true,
+  "text": true,
+  "metadata": false
+}

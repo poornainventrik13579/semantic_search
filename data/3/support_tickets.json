@@ -1,0 +1,9 @@
+{
+  "ticket_id": false,
+  "customer_name": false,
+  "subject": true,
+  "content": true,
+  "status": false,
+  "priority": true,
+  "category": true
+}

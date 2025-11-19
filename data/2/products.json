@@ -1,0 +1,9 @@
+{
+  "product_id": false,
+  "name": true,
+  "description": true,
+  "category": true,
+  "price": false,
+  "brand": true,
+  "rating": false
+}

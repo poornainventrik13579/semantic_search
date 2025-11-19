@@ -1,0 +1,7 @@
+{
+  "article_id": false,
+  "title": true,
+  "author": false,
+  "category": true,
+  "text": true
+}

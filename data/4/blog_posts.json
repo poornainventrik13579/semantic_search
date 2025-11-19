@@ -1,0 +1,9 @@
+{
+  "post_id": false,
+  "title": true,
+  "body": true,
+  "author": false,
+  "tags": true,
+  "published_date": false,
+  "views": false
+}
