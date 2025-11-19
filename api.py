@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -8,9 +8,12 @@ import sys
 import argparse
 import uvicorn
 import logging
+import json
+import shutil
 
 from searcher import TenantSearch
-from config import DATA_DIR
+from config import DATA_DIR, CACHE_DIR
+from cache import EmbeddingCache
 # from pyngrok import ngrok
 
 logging.basicConfig(
@@ -37,6 +40,11 @@ class SearchRequest(BaseModel):
     dataset: str
     query: str
     k: Optional[int] = 5
+
+
+class DeleteRequest(BaseModel):
+    tenant_id: str
+    dataset: str
 
 
 @app.on_event("startup")
@@ -143,6 +151,96 @@ def search(request: SearchRequest):
         raise
     except Exception as e:
         logger.error(f"Search error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/upload")
+async def upload_dataset(
+    file: UploadFile = File(...),
+    tenant_id: str = Form(...),
+    dataset: str = Form(...),
+    schema: str = Form(...)
+):
+    logger.info(f"Upload request: tenant={tenant_id}, dataset={dataset}")
+
+    try:
+        schema_dict = json.loads(schema)
+
+        tenant_path = os.path.join(DATA_DIR, tenant_id)
+        os.makedirs(tenant_path, exist_ok=True)
+
+        csv_path = os.path.join(tenant_path, f"{dataset}.csv")
+        with open(csv_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        schema_path = os.path.join(tenant_path, f"{dataset}.json")
+        with open(schema_path, "w") as f:
+            json.dump(schema_dict, f, indent=2)
+
+        logger.info(f"Dataset uploaded: {csv_path}")
+        return {
+            "message": "Dataset uploaded successfully",
+            "tenant_id": tenant_id,
+            "dataset": dataset,
+            "csv_path": csv_path,
+            "schema_path": schema_path
+        }
+
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid schema JSON")
+    except Exception as e:
+        logger.error(f"Upload error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/dataset")
+def delete_dataset(request: DeleteRequest):
+    logger.info(f"Delete request: tenant={request.tenant_id}, dataset={request.dataset}")
+
+    try:
+        tenant_path = os.path.join(DATA_DIR, request.tenant_id)
+
+        if not os.path.exists(tenant_path):
+            raise HTTPException(status_code=404, detail=f"Tenant '{request.tenant_id}' not found")
+
+        csv_path = os.path.join(tenant_path, f"{request.dataset}.csv")
+        schema_path = os.path.join(tenant_path, f"{request.dataset}.json")
+
+        deleted_files = []
+
+        if os.path.exists(csv_path):
+            os.remove(csv_path)
+            deleted_files.append(csv_path)
+
+        if os.path.exists(schema_path):
+            os.remove(schema_path)
+            deleted_files.append(schema_path)
+
+        cache = EmbeddingCache(CACHE_DIR)
+        cache_key = f"{request.tenant_id}_{request.dataset}"
+        if cache.exists(cache_key):
+            cache.clear(cache_key)
+            logger.info(f"Cache cleared for: {cache_key}")
+
+        if cache_key in tenant_cache:
+            del tenant_cache[cache_key]
+            logger.info(f"Removed from memory cache: {cache_key}")
+
+        if not deleted_files:
+            raise HTTPException(status_code=404, detail=f"Dataset '{request.dataset}' not found")
+
+        logger.info(f"Deleted files: {deleted_files}")
+        return {
+            "message": "Dataset deleted successfully",
+            "tenant_id": request.tenant_id,
+            "dataset": request.dataset,
+            "deleted_files": deleted_files
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
