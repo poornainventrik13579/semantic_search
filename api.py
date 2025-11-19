@@ -56,6 +56,9 @@ def get_or_load_tenant(tenant_id: str, dataset: str):
     tenant_cache[cache_key] = searcher
     return searcher
 
+@app.get("/")
+def read_root():
+    return {"message": "API is running", "status": "ok"}
 
 @app.post("/search", response_model=List[Dict[str, Any]])
 def search(request: SearchRequest):
