@@ -1,7 +1,5 @@
-numpy>=1.24.0
-pandas>=2.0.0
 sentence-transformers>=2.2.0
 fastapi>=0.104.0
-uvicorn>=0.24.0
-python-multipart>=0.0.6
-pyngrok>=7.0.0
+uvicorn[standard]>=0.24.0
+pandas
+pyarrow
