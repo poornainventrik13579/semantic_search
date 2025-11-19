@@ -7,10 +7,17 @@ import os
 import sys
 import argparse
 import uvicorn
+import logging
 
 from searcher import TenantSearch
 from config import DATA_DIR
-from pyngrok import ngrok
+# from pyngrok import ngrok
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Semantic Search API", version="1.0.0")
 
@@ -32,44 +39,83 @@ class SearchRequest(BaseModel):
     k: Optional[int] = 5
 
 
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Application starting up...")
+    logger.info(f"DATA_DIR: {DATA_DIR}")
+    logger.info(f"DATA_DIR exists: {os.path.exists(DATA_DIR)}")
+    if os.path.exists(DATA_DIR):
+        logger.info(f"Contents: {os.listdir(DATA_DIR)}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("Application shutting down...")
+
+
 def get_or_load_tenant(tenant_id: str, dataset: str):
     cache_key = f"{tenant_id}_{dataset}"
+    logger.info(f"Loading tenant: {tenant_id}, dataset: {dataset}")
 
     if cache_key in tenant_cache:
+        logger.info(f"Using cached tenant: {cache_key}")
         return tenant_cache[cache_key]
 
     tenant_path = os.path.join(DATA_DIR, tenant_id)
+    logger.info(f"Tenant path: {tenant_path}")
+    
     if not os.path.exists(tenant_path):
+        logger.error(f"Tenant path not found: {tenant_path}")
         raise HTTPException(status_code=404, detail=f"Tenant '{tenant_id}' not found")
 
     dataset_file = os.path.join(tenant_path, f"{dataset}.csv")
+    logger.info(f"Dataset file: {dataset_file}")
+    
     if not os.path.exists(dataset_file):
+        logger.error(f"Dataset file not found: {dataset_file}")
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset}' not found in tenant '{tenant_id}'")
 
-    searcher = TenantSearch(tenant_id, dataset_file=dataset_file)
+    try:
+        logger.info("Creating TenantSearch instance...")
+        searcher = TenantSearch(tenant_id, dataset_file=dataset_file)
 
-    if not searcher.load_data(use_cache=True):
-        raise HTTPException(status_code=500, detail="Failed to load tenant data")
+        logger.info("Loading data...")
+        if not searcher.load_data(use_cache=True):
+            logger.error("Failed to load tenant data")
+            raise HTTPException(status_code=500, detail="Failed to load tenant data")
 
-    searcher.create_embeddings()
+        logger.info("Creating embeddings...")
+        searcher.create_embeddings()
 
-    tenant_cache[cache_key] = searcher
-    return searcher
+        tenant_cache[cache_key] = searcher
+        logger.info(f"Successfully loaded and cached tenant: {cache_key}")
+        return searcher
+    
+    except Exception as e:
+        logger.error(f"Error loading tenant: {str(e)}", exc_info=True)
+        raise
+
 
 @app.get("/")
 def read_root():
+    logger.info("Root endpoint called")
     return {"message": "API is running", "status": "ok"}
+
 
 @app.post("/search", response_model=List[Dict[str, Any]])
 def search(request: SearchRequest):
+    logger.info(f"Search request: tenant={request.tenant_id}, dataset={request.dataset}, query={request.query}, k={request.k}")
+    
     try:
         searcher = get_or_load_tenant(request.tenant_id, request.dataset)
 
+        logger.info("Performing search...")
         results, search_time = searcher.search(
             request.query,
             top_k=request.k,
             min_score=0.0
         )
+        logger.info(f"Search completed in {search_time:.4f}s, found {len(results)} results")
 
         formatted_results = []
         for rank, result in enumerate(results, 1):
@@ -90,49 +136,57 @@ def search(request: SearchRequest):
 
             formatted_results.append(result_dict)
 
+        logger.info(f"Returning {len(formatted_results)} formatted results")
         return formatted_results
 
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"Search error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 def main():
     parser = argparse.ArgumentParser(description='Semantic Search API')
-    parser.add_argument('--ngrok', action='store_true', help='Enable ngrok')
+    # parser.add_argument('--ngrok', action='store_true', help='Enable ngrok')
     parser.add_argument('--port', type=int, default=8000, help='Port')
     args = parser.parse_args()
-    args.port = 8000
+    
+    port = int(os.environ.get("PORT", args.port))
+    logger.info(f"Starting server on port {port}")
 
-    if args.ngrok:
-        if ngrok is None:
-            print("Error: Install pyngrok")
-            sys.exit(1)
+    # if args.ngrok:
+    #     if ngrok is None:
+    #         logger.error("pyngrok not installed")
+    #         print("Error: Install pyngrok")
+    #         sys.exit(1)
 
-        try:
-            token = os.getenv("NGROK_AUTHTOKEN")
-            if token:
-                ngrok.set_auth_token(token)
+    #     try:
+    #         token = os.getenv("NGROK_AUTHTOKEN")
+    #         if token:
+    #             ngrok.set_auth_token(token)
 
-            public_url = ngrok.connect(args.port)
+    #         public_url = ngrok.connect(port)
 
-            print("Semantic Search API")
-            print("-" * 50)
-            print(f"Public: {public_url}")
-            print(f"Local:  http://localhost:{args.port}")
-            print(f"Docs:   {public_url}/docs")
-            print("-" * 50)
+    #         print("Semantic Search API")
+    #         print("-" * 50)
+    #         print(f"Public: {public_url}")
+    #         print(f"Local:  http://localhost:{port}")
+    #         print(f"Docs:   {public_url}/docs")
+    #         print("-" * 50)
 
-        except Exception as e:
-            print(f"Error: {e}")
-            sys.exit(1)
-    else:
-        print("Semantic Search API")
-        print("-" * 50)
-        print(f"Server: http://localhost:{args.port}")
-        print(f"Docs:   http://localhost:{args.port}/docs")
-        print("-" * 50)
+    #     except Exception as e:
+    #         logger.error(f"Ngrok error: {e}", exc_info=True)
+    #         print(f"Error: {e}")
+    #         sys.exit(1)
+    # else:
+    print("Semantic Search API")
+    print("-" * 50)
+    print(f"Server: http://localhost:{port}")
+    print(f"Docs:   http://localhost:{port}/docs")
+    print("-" * 50)
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":
